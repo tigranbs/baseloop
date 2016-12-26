@@ -30,7 +30,7 @@
 
 namespace BaseLoop {
 
-    struct loop_cmd {
+    struct loop_cmd_t {
         int cmd;
         void *data;
     };
@@ -68,7 +68,7 @@ namespace BaseLoop {
         // making sure that event loop would't compare it as a socket number
         int listener = -57;
         int max_event_count = 5000;
-        std::list<loop_cmd> commands;
+        std::list<loop_cmd_t*> commands;
 
         // callback for accepting connection here
         virtual void acceptable(loop_event_data *data) {};
@@ -88,7 +88,7 @@ namespace BaseLoop {
 
         bool pipe_writable = false;
 
-        std::list<loop_cmd> _commands;
+        std::list<loop_cmd_t*> _commands;
 
         loop_event_data pipe_event_data;
     public:
@@ -110,10 +110,10 @@ namespace BaseLoop {
             this->register_event(this->pipe_chan, &this->pipe_event_data, false);
         }
 
-        void send_cmd(loop_cmd cmd)
+        void send_cmd(loop_cmd_t *cmd)
         {
             loop_cmd_locker.lock();
-            this->_commands.push_back(std::move(cmd));
+            this->_commands.push_back(cmd);
 
             // not making system call if we did already on one cycle
             // waiting until command will complete, then we would make it writable again
