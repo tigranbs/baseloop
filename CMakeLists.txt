@@ -7,6 +7,6 @@ include_directories(./src)
 
 set(SOURCE_FILES
         main.cpp
-        src/baseloop.h)
+        baseloop.h actions.h)
 
 add_executable(baseloop main.cpp ${SOURCE_FILES})
