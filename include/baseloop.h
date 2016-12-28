@@ -189,8 +189,7 @@ namespace BaseLoop {
         }
 
         /// one time actions which are needed to init base components for event loop
-        void init_loop()
-        {
+        void init_loop() {
             int pipe_chans[2];
             pipe(pipe_chans);
             this->pipe_chan = pipe_chans[1];
@@ -209,8 +208,7 @@ namespace BaseLoop {
         /// Base function for sending commands to this loop
         /// it will make pipe writable and will insert command to our list
         /// so when loop would be ready to consume pipe we will iterate over commands
-        inline void send_cmd(loop_cmd_t *cmd)
-        {
+        inline void send_cmd(loop_cmd_t *cmd) {
             loop_cmd_locker.lock();
             this->_commands.push_back(cmd);
 
