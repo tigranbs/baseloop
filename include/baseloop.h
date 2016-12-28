@@ -64,14 +64,11 @@ namespace BaseLoop {
         BaseLoop() {}
 
     protected:
-        /// just raw number to make sure if we don't have server listener
-        /// making sure that event loop would't compare it as a socket number
-        int listener = -1;
         /// Commands List which are used during execution
         std::list<loop_cmd_t*> commands;
 
         /// callback for accepting connection here
-        virtual void acceptable(loop_event_data_t *data) {};
+        virtual void acceptable(loop_event_data_t *data, int fd) {};
 
         /// callback for reading data from socket here
         virtual void readable(loop_event_data_t *data) {};
@@ -83,6 +80,10 @@ namespace BaseLoop {
         virtual void notify() {};
 
     private:
+        /// just raw number to make sure if we don't have server listener
+        /// making sure that event loop would't compare it as a socket number
+        int listener = -1;
+
         /// member for keeping pipe handle which would be used for sending commands
         /// from other threads to this loop (similar to Thread Channels, but it's NOT!)
         int pipe_chan = -1;
@@ -100,6 +101,25 @@ namespace BaseLoop {
 
         /// just a local data for keeping some reference to our pipe options inside Kernel Loop
         loop_event_data_t pipe_event_data;
+
+        /// Accepting connections from server socket
+        inline void accept_conn(loop_event_data_t *data) {
+            if(this->listener <= 0)
+                return;
+
+            struct sockaddr addr;
+            socklen_t socklen;
+            int fd = -1;
+            for(;;) {
+                fd = accept(this->listener, &addr, &socklen);
+                if(fd <= 0)
+                    break;
+
+                // calling callback function for handling accepted connection
+                this->acceptable(data, fd);
+            }
+        }
+
     public:
 
         /// making connection non blocking for handling async events from kernel Event Loop
@@ -259,6 +279,7 @@ namespace BaseLoop {
             close(this->event_fd);
         }
 
+        /// Start base loop running Epoll or Kqueue
         void run_loop() {
 
 #ifdef USE_KQUEUE
@@ -299,7 +320,7 @@ namespace BaseLoop {
                         this->notify();
                     }
                     else if(get_events[i].ident == this->listener) {
-                        this->acceptable((loop_event_data_t *)get_events[i].udata);
+                        this->accept_conn((loop_event_data_t *)get_events[i].udata);
                     }
                     else if(get_events[i].filter == EVFILT_READ) {
                         this->readable((loop_event_data_t *)get_events[i].udata);
@@ -367,8 +388,6 @@ namespace BaseLoop {
             }
 #endif
         }
-
-
     };
 }
 
