@@ -6,10 +6,10 @@
 
 using namespace BaseLoop;
 
-class TestServer: public BaseLoop {
+class TestServer: public EventLoop {
 protected:
     // callback for accepting connection here
-    void acceptable(loop_event_data_t *data);
+    void acceptable(loop_event_data_t *data, int fd);
     // callback for reading data from socket here
     void readable(loop_event_data_t *data);
     // callback for writing data to socket
@@ -20,5 +20,4 @@ protected:
 
 int main() {
     TestServer server;
-
 }

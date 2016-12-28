@@ -37,7 +37,7 @@
 
 namespace BaseLoop {
 
-    typedef int(*after_resolve_t)(int, const struct sockaddr *, socklen_t);
+    using ResolveFN = int(*)(int, const struct sockaddr *, socklen_t);
 
     struct loop_cmd_t {
         int cmd = -1;
@@ -57,11 +57,11 @@ namespace BaseLoop {
         void *data = nullptr;
     };
 
-    class BaseLoop {
+    class EventLoop {
     public:
         /// Just an empty destructor/constructor
-        ~BaseLoop() {}
-        BaseLoop() {}
+        ~EventLoop() {}
+        EventLoop() {}
 
     private:
         /// just raw number to make sure if we don't have server listener
@@ -106,7 +106,7 @@ namespace BaseLoop {
 
         /// Using this function we will resolve given address and then for every resolved address Hint
         /// we will apply "rs" argument function, so that for client it would be 'connect' function for server 'bind'
-        inline int resolve_tcp_addr(std::string &address, after_resolve_t rs) {
+        inline int resolve_tcp_addr(std::string &address, ResolveFN rs) {
             const unsigned long split_index = address.find(':');
             const std::string host = address.substr(0, split_index);
             const std::string port = address.substr(split_index + 1);
@@ -173,7 +173,7 @@ namespace BaseLoop {
             int status = this->resolve_tcp_addr(address, bind);
             if(status < 0)
                 return status;
-            this->tcp_listener = this->tcp_listener;
+            this->tcp_listener = status;
 
             status = listen(this->tcp_listener, UINT16_MAX);
             if(status < 0) {
