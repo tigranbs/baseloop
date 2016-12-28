@@ -37,6 +37,8 @@
 
 namespace BaseLoop {
 
+    typedef int(*after_resolve_t)(int, const struct sockaddr *, socklen_t);
+
     struct loop_cmd_t {
         int cmd = -1;
         void *data = nullptr;
@@ -102,6 +104,53 @@ namespace BaseLoop {
             }
         }
 
+        /// Using this function we will resolve given address and then for every resolved address Hint
+        /// we will apply "rs" argument function, so that for client it would be 'connect' function for server 'bind'
+        inline int resolve_tcp_addr(std::string &address, after_resolve_t rs) {
+            const unsigned long split_index = address.find(':');
+            const std::string host = address.substr(0, split_index);
+            const std::string port = address.substr(split_index + 1);
+            int ret_socket = -1;
+
+            struct addrinfo hints, * res, *rp;
+            memset(& hints, 0, sizeof hints);
+            // Set the attribute for hint
+            hints.ai_family = AF_UNSPEC; // We don't care V4 AF_INET or 6 AF_INET6
+            hints.ai_socktype = SOCK_STREAM; // TCP Socket SOCK_DGRAM
+            hints.ai_flags = AI_PASSIVE;
+
+            // getting address information
+            int status = getaddrinfo((host.length() > 0 ? host.c_str() : NULL), port.c_str(), &hints, &res);
+            if(status != 0) {
+                return status;
+            }
+
+            for(rp = res; rp != NULL; rp = rp->ai_next) {
+                ret_socket = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+                if(ret_socket <= 0)
+                    continue;
+
+                this->make_socket_non_blocking(ret_socket);
+
+                status = rs(ret_socket, rp->ai_addr, rp->ai_addrlen);
+                if(status >= 0)
+                    break;
+
+                close(ret_socket);
+                ret_socket = -1;
+            }
+
+            // cleaning up address result during lookup
+            freeaddrinfo(res);
+
+            // checking if we got any address or not
+            if(rp == NULL || ret_socket == -1) {
+                return EAI_FAIL;
+            }
+
+            return ret_socket;
+        }
+
     protected:
         /// Commands List which are used during execution
         std::list<loop_cmd_t*> commands;
@@ -120,46 +169,11 @@ namespace BaseLoop {
 
         /// Binding server on given address
         /// NOTE: address should be in format host:port
-        int listen_tcp(std::string address) {
-            const unsigned long split_index = address.find(':');
-            const std::string host = address.substr(0, split_index);
-            const std::string port = address.substr(split_index + 1);
-
-            struct addrinfo hints, * res, *rp;
-            memset(& hints, 0, sizeof hints);
-            // Set the attribute for hint
-            hints.ai_family = AF_UNSPEC; // We don't care V4 AF_INET or 6 AF_INET6
-            hints.ai_socktype = SOCK_STREAM; // TCP Socket SOCK_DGRAM
-            hints.ai_flags = AI_PASSIVE;
-
-            // getting address information
-            int status = getaddrinfo((host.length() > 0 ? host.c_str() : NULL), port.c_str(), &hints, &res);
-            if(status != 0) {
+        int listen_tcp(std::string &address) {
+            int status = this->resolve_tcp_addr(address, bind);
+            if(status < 0)
                 return status;
-            }
-
-            for(rp = res; rp != NULL; rp = rp->ai_next) {
-                this->tcp_listener = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-                if(this->tcp_listener <= 0)
-                    continue;
-
-                this->make_socket_non_blocking(this->tcp_listener);
-
-                status = bind(this->tcp_listener, rp->ai_addr, rp->ai_addrlen);
-                if(status >= 0)
-                    break;
-
-                close(this->tcp_listener);
-                this->tcp_listener = -1;
-            }
-
-            // cleaning up address result during lookup
-            freeaddrinfo(res);
-
-            // checking if we got any address or not
-            if(rp == NULL || this->tcp_listener == -1) {
-                return EAI_FAIL;
-            }
+            this->tcp_listener = this->tcp_listener;
 
             status = listen(this->tcp_listener, UINT16_MAX);
             if(status < 0) {
@@ -170,6 +184,13 @@ namespace BaseLoop {
 
             // if we got here then we have listening tcp socket
             return 0;
+        }
+
+        /// Function for making client TCP connections
+        /// Unfortunately this function is Blocking function!
+        int connect_tcp(std::string &address) {
+            // resolving address and connecting to it
+            return this->resolve_tcp_addr(address, connect);
         }
 
         /// making connection non blocking for handling async events from kernel Event Loop
