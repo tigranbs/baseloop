@@ -35,8 +35,6 @@
 #include "vector"
 #include "string"
 
-#include "helpers.h"
-
 namespace BaseLoop {
 
     struct loop_cmd_t {
@@ -63,26 +61,10 @@ namespace BaseLoop {
         ~BaseLoop() {}
         BaseLoop() {}
 
-    protected:
-        /// Commands List which are used during execution
-        std::list<loop_cmd_t*> commands;
-
-        /// callback for accepting connection here
-        virtual void acceptable(loop_event_data_t *data, int fd) {};
-
-        /// callback for reading data from socket here
-        virtual void readable(loop_event_data_t *data) {};
-
-        /// callback for writing data to socket
-        virtual void writable(loop_event_data_t *data) {};
-
-        /// get notification from pipe and read commands
-        virtual void notify() {};
-
     private:
         /// just raw number to make sure if we don't have server listener
         /// making sure that event loop would't compare it as a socket number
-        int listener = -1;
+        int tcp_listener = -1;
 
         /// member for keeping pipe handle which would be used for sending commands
         /// from other threads to this loop (similar to Thread Channels, but it's NOT!)
@@ -103,15 +85,15 @@ namespace BaseLoop {
         loop_event_data_t pipe_event_data;
 
         /// Accepting connections from server socket
-        inline void accept_conn(loop_event_data_t *data) {
-            if(this->listener <= 0)
+        inline void accept_tcp(loop_event_data_t *data) {
+            if(this->tcp_listener <= 0)
                 return;
 
             struct sockaddr addr;
             socklen_t socklen;
             int fd = -1;
             for(;;) {
-                fd = accept(this->listener, &addr, &socklen);
+                fd = accept(this->tcp_listener, &addr, &socklen);
                 if(fd <= 0)
                     break;
 
@@ -120,10 +102,78 @@ namespace BaseLoop {
             }
         }
 
-    public:
+    protected:
+        /// Commands List which are used during execution
+        std::list<loop_cmd_t*> commands;
+
+        /// callback for accepting connection here
+        virtual void acceptable(loop_event_data_t *data, int fd) {};
+
+        /// callback for reading data from socket here
+        virtual void readable(loop_event_data_t *data) {};
+
+        /// callback for writing data to socket
+        virtual void writable(loop_event_data_t *data) {};
+
+        /// get notification from pipe and read commands
+        virtual void notify() {};
+
+        /// Binding server on given address
+        /// NOTE: address should be in format host:port
+        int listen_tcp(std::string address) {
+            const unsigned long split_index = address.find(':');
+            const std::string host = address.substr(0, split_index);
+            const std::string port = address.substr(split_index + 1);
+
+            struct addrinfo hints, * res, *rp;
+            memset(& hints, 0, sizeof hints);
+            // Set the attribute for hint
+            hints.ai_family = AF_UNSPEC; // We don't care V4 AF_INET or 6 AF_INET6
+            hints.ai_socktype = SOCK_STREAM; // TCP Socket SOCK_DGRAM
+            hints.ai_flags = AI_PASSIVE;
+
+            // getting address information
+            int status = getaddrinfo((host.length() > 0 ? host.c_str() : NULL), port.c_str(), &hints, &res);
+            if(status != 0) {
+                return status;
+            }
+
+            for(rp = res; rp != NULL; rp = rp->ai_next) {
+                this->tcp_listener = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+                if(this->tcp_listener <= 0)
+                    continue;
+
+                this->make_socket_non_blocking(this->tcp_listener);
+
+                status = bind(this->tcp_listener, rp->ai_addr, rp->ai_addrlen);
+                if(status >= 0)
+                    break;
+
+                close(this->tcp_listener);
+                this->tcp_listener = -1;
+            }
+
+            // cleaning up address result during lookup
+            freeaddrinfo(res);
+
+            // checking if we got any address or not
+            if(rp == NULL || this->tcp_listener == -1) {
+                return EAI_FAIL;
+            }
+
+            status = listen(this->tcp_listener, UINT16_MAX);
+            if(status < 0) {
+                close(this->tcp_listener);
+                this->tcp_listener = -1;
+                return status;
+            }
+
+            // if we got here then we have listening tcp socket
+            return 0;
+        }
 
         /// making connection non blocking for handling async events from kernel Event Loop
-        int make_socket_non_blocking (int sfd) {
+        inline int make_socket_non_blocking (int sfd) {
             const int flags = fcntl (sfd, F_GETFL, 0);
             if ( flags == -1) {
                 return -1;
@@ -159,7 +209,7 @@ namespace BaseLoop {
         /// Base function for sending commands to this loop
         /// it will make pipe writable and will insert command to our list
         /// so when loop would be ready to consume pipe we will iterate over commands
-        void send_cmd(loop_cmd_t *cmd)
+        inline void send_cmd(loop_cmd_t *cmd)
         {
             loop_cmd_locker.lock();
             this->_commands.push_back(cmd);
@@ -179,7 +229,7 @@ namespace BaseLoop {
         /// Registering Socket handle for this event loop based on environment Epoll or Kqueue
         /// This will make a system call for just adding given handle to Kernel file handles list for consuming events
         /// But at this point we are not registering any events, we will add them as a separate function calls
-        void register_handle(loop_event_data_t *data) {
+        inline void register_handle(loop_event_data_t *data) {
             if(data == nullptr)
                 return;
 
@@ -204,33 +254,32 @@ namespace BaseLoop {
 #endif
         }
 
-
         /// Making socket readable for starting data handling
         /// This will disable "Write" events from this socket
         /// If "one_shot" is true then socket would be registered as "ONE_SHOT" based on OS Epoll or Kqueue
-        void make_readable(loop_event_data_t *data) {
+        inline void make_readable(loop_event_data_t *data) {
             this->reregister_handle(data, false, false);
         }
 
         /// Same as "make_readable" but registering event as "One Shot" which means it will trigger only once for this handle
         /// So if we want to get another event we need to reregister this handle again
-        void make_readable_one_shot(loop_event_data_t *data) {
+        inline void make_readable_one_shot(loop_event_data_t *data) {
             this->reregister_handle(data, false, true);
         }
 
         /// Making socket writable for getting event when this socket is ready for writing buffer
         /// This wouldn't disable socket for read events by default, but it is possible to specify "write_only" boolean to true
-        void make_writable(loop_event_data_t *data, bool write_only = false) {
+        inline void make_writable(loop_event_data_t *data, bool write_only = false) {
             this->reregister_handle(data, false, false, write_only);
         }
 
         /// Same as "make_writable" but registering with one shot principle
-        void make_writable_one_shot(loop_event_data_t *data, bool write_only = false) {
+        inline void make_writable_one_shot(loop_event_data_t *data, bool write_only = false) {
             this->reregister_handle(data, false, true, write_only);
         }
 
         /// Base function for reregistering event handle for this loop
-        void reregister_handle(loop_event_data_t *data, bool readable, bool one_shot, bool write_only = false) {
+        inline void reregister_handle(loop_event_data_t *data, bool readable, bool one_shot, bool write_only = false) {
             if(data == nullptr)
                 return;
 
@@ -319,8 +368,8 @@ namespace BaseLoop {
                         loop_cmd_locker.unlock();
                         this->notify();
                     }
-                    else if(get_events[i].ident == this->listener) {
-                        this->accept_conn((loop_event_data_t *)get_events[i].udata);
+                    else if(get_events[i].ident == this->tcp_listener) {
+                        this->accept_tcp((loop_event_data_t *)get_events[i].udata);
                     }
                     else if(get_events[i].filter == EVFILT_READ) {
                         this->readable((loop_event_data_t *)get_events[i].udata);
