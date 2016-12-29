@@ -6,7 +6,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 include_directories(./include)
 
 set(SOURCE_FILES
-        main.cpp
+        tcp_echo_example.cpp
         include/baseloop.h)
 
-add_executable(baseloop main.cpp ${SOURCE_FILES})
+add_executable(baseloop tcp_echo_example.cpp ${SOURCE_FILES})
