@@ -89,6 +89,7 @@ namespace BaseLoop {
 
         /// just a local data for keeping some reference to our pipe options inside Kernel Loop
         loop_event_data_t pipe_event_data;
+        loop_event_data_t tcp_server_event_data;
 
         /// Accepting connections from server socket
         inline void accept_tcp(loop_event_data_t *data) {
@@ -97,9 +98,8 @@ namespace BaseLoop {
 
             struct sockaddr addr;
             socklen_t socklen;
-            int fd = -1;
             for(;;) {
-                fd = accept(this->tcp_listener, &addr, &socklen);
+                const int fd = accept(this->tcp_listener, &addr, &socklen);
                 if(fd <= 0)
                     break;
 
@@ -188,6 +188,11 @@ namespace BaseLoop {
                 this->tcp_listener = -1;
                 return status;
             }
+
+            this->tcp_server_event_data.data = NULL;
+            this->tcp_server_event_data.fd = this->tcp_listener;
+            this->register_handle(&this->tcp_server_event_data);
+            this->make_readable(&this->tcp_server_event_data);
 
             // if we got here then we have listening tcp socket
             return 0;
@@ -284,7 +289,7 @@ namespace BaseLoop {
         /// This will disable "Write" events from this socket
         /// If "one_shot" is true then socket would be registered as "ONE_SHOT" based on OS Epoll or Kqueue
         inline void make_readable(loop_event_data_t *data) {
-            this->reregister_handle(data, false, false);
+            this->reregister_handle(data, true, false);
         }
 
         /// Same as "make_readable" but registering event as "One Shot" which means it will trigger only once for this handle
@@ -353,11 +358,11 @@ namespace BaseLoop {
         inline void read_data(loop_event_data_t *data) {
             ssize_t r;
             for(;;) {
-                r = recv(data->fd, this->readable_buffer, BASE_LOOP_READABLE_DATA_SIZE, 0);
+                r = read(data->fd, this->readable_buffer, BASE_LOOP_READABLE_DATA_SIZE);
                 // if we have an error during read process
                 if(r <= 0) {
                     // checking if our socket is still not ready to read data
-                    if(errno == EAGAIN || errno == EWOULDBLOCK)
+                    if(r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
                         return;
 
                     // closing connection in case of error or EOF
