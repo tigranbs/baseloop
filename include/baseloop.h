@@ -8,6 +8,7 @@
 /** Defining members which are probably could be changed */
 
 #define BASE_LOOP_EVENTS_COUNT 5000
+#define BASE_LOOP_READABLE_DATA_SIZE 65000
 
 /** End of definitions */
 
@@ -77,8 +78,11 @@ namespace BaseLoop {
         /// we need some locking mutex for thread safe command insert/delete
         std::mutex loop_cmd_locker;
 
-        /// keeping track about our PIPe is writable or not
+        /// keeping track about our pipe is writable or not
         bool pipe_writable = false;
+
+        /// statically allocated memory for reading socket buffer
+        char readable_buffer[BASE_LOOP_READABLE_DATA_SIZE];
 
         /// List of commands which are used to keep them before event loop would have a time to process them
         std::list<loop_cmd_t*> _commands;
@@ -159,13 +163,16 @@ namespace BaseLoop {
         virtual void acceptable(loop_event_data_t *data, int fd) {};
 
         /// callback for reading data from socket here
-        virtual void readable(loop_event_data_t *data) {};
+        virtual void readable(loop_event_data_t *data, char *buffer, size_t read_len) {};
 
         /// callback for writing data to socket
         virtual void writable(loop_event_data_t *data) {};
 
         /// get notification from pipe and read commands
         virtual void notify() {};
+
+        /// callback function for getting connection close event
+        virtual void closed(loop_event_data_t *data) {};
 
         /// Binding server on given address
         /// NOTE: address should be in format host:port
@@ -342,6 +349,34 @@ namespace BaseLoop {
             close(fd);
         }
 
+        /// Base function for reading data and passing it as a callback
+        inline void read_data(loop_event_data_t *data) {
+            ssize_t r;
+            for(;;) {
+                r = recv(data->fd, this->readable_buffer, BASE_LOOP_READABLE_DATA_SIZE, 0);
+                // if we have an error during read process
+                if(r <= 0) {
+                    // checking if our socket is still not ready to read data
+                    if(errno == EAGAIN || errno == EWOULDBLOCK)
+                        return;
+
+                    // closing connection in case of error or EOF
+                    this->close_fd(data->fd);
+                    // calling callback function to handle connection close event
+                    this->closed(data);
+                    break;
+                }
+
+                // calling callback for handling data which we got
+                this->readable(data, this->readable_buffer, (size_t)r);
+
+                // if we got data less than max buffer size then we have all socket data
+                // returning to get back when we will have more data
+                if(r < BASE_LOOP_READABLE_DATA_SIZE)
+                    break;
+            }
+        }
+
         /// stopping event loop, but this actually not a thread safe call !!
         void stop_loop() {
             close(this->event_fd);
@@ -391,7 +426,7 @@ namespace BaseLoop {
                         this->accept_tcp((loop_event_data_t *)get_events[i].udata);
                     }
                     else if(get_events[i].filter == EVFILT_READ) {
-                        this->readable((loop_event_data_t *)get_events[i].udata);
+                        this->read_data((loop_event_data_t *)get_events[i].udata);
                     }
                     else if(get_events[i].filter == EVFILT_WRITE) {
                         this->writable((loop_event_data_t *)get_events[i].udata);
