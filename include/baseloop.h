@@ -169,7 +169,7 @@ namespace BaseLoop {
         virtual void writable(loop_event_data_t *data) {};
 
         /// get notification from pipe and read commands
-        virtual void notify() {};
+        virtual void notify(loop_cmd_t *cmd) {};
 
         /// callback function for getting connection close event
         virtual void closed(loop_event_data_t *data) {};
@@ -414,13 +414,17 @@ namespace BaseLoop {
                             // copying commands here for disabling locking here
                             this->commands.insert(this->commands.end(), this->_commands.begin(), this->_commands.end());
                             // clearing original list for adding to it more
-                            this->_commands.erase(this->_commands.begin(), this->_commands.end());
                             this->_commands.clear();
                         }
 
                         this->pipe_writable = false;
                         loop_cmd_locker.unlock();
-                        this->notify();
+                        while(!this->commands.empty()) {
+                            auto cmd = this->commands.front();
+                            this->notify(cmd);
+                            this->commands.pop_front();
+                            delete cmd;
+                        }
                     }
                     else if(get_events[i].ident == this->tcp_listener) {
                         this->accept_tcp((loop_event_data_t *)get_events[i].udata);
